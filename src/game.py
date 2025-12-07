@@ -88,6 +88,8 @@ class Game:
         
         self.all_sprites = pygame.sprite.Group(self.player, *self.platforms, *self.enemies, 
                                                *self.obstacles, *self.treasures, *self.health_pickups, *self.doors)
+        # Reset UI flags
+        self.player_is_at_unlocked_door = False
         if self.boss:
             self.all_sprites.add(self.boss)
     
@@ -151,6 +153,11 @@ class Game:
             if event.type == pygame.QUIT:
                 return False
             if event.type == pygame.KEYDOWN:
+                if self.game_state == GAME_STATE_PLAYING:
+                    # If player is at an unlocked door and presses space, proceed
+                    if event.key == pygame.K_SPACE and self.player_is_at_unlocked_door:
+                        self.game_state = GAME_STATE_LEVEL_COMPLETE
+                        continue
                 if self.game_state == GAME_STATE_GAMEOVER:
                     if event.key == pygame.K_r:
                         self.__init__(level=1)
@@ -245,11 +252,11 @@ class Game:
             for door in self.doors:
                 door.unlock()
         
-        # Check if player exited through door
+        # Check if player is standing/colliding with an unlocked door. Player must press SPACE to enter.
+        self.player_is_at_unlocked_door = False
         for door in self.doors:
-            if door.is_player_exiting(self.player.rect):
-                if door.unlocked:
-                    self.game_state = GAME_STATE_LEVEL_COMPLETE
+            if door.unlocked and door.rect.colliderect(self.player.rect):
+                self.player_is_at_unlocked_door = True
         
         # Check if player is dead
         if self.player.health <= 0:
@@ -308,6 +315,13 @@ class Game:
             if self.camera.is_visible(door.rect):
                 offset_rect = self.camera.apply_offset(door.rect)
                 self.screen.blit(door.image, offset_rect)
+                # Draw a clear label above unlocked doors and prompt when player stands near
+                if door.unlocked:
+                    unlocked_text = self.small_font.render("Door Unlocked", True, (0, 150, 0))
+                    self.screen.blit(unlocked_text, (offset_rect.x, offset_rect.y - 22))
+                    if door.rect.colliderect(self.player.rect):
+                        prompt_text = self.small_font.render("Press SPACE to Enter", True, (0, 150, 0))
+                        self.screen.blit(prompt_text, (offset_rect.x, offset_rect.y - 44))
         
         # Player
         player_offset_rect = self.camera.apply_offset(self.player.rect)
@@ -377,7 +391,7 @@ class Game:
                 pygame.draw.circle(self.screen, (200, 200, 200), (sticker_x + i * 20, 40), 5)
         
         # Draw controls hint
-        controls_text = self.small_font.render("Arrow Keys: Move | Space: Jump | A: Attack | Down+Space: Jump Down", True, (100, 100, 100))
+        controls_text = self.small_font.render("Arrow Keys: Move | Space: Jump | A: Attack | Down+Space: Jump Down | Space at unlocked door: Enter", True, (100, 100, 100))
         self.screen.blit(controls_text, (10, HEIGHT - 30))
         
         # Optional: Draw camera debug info (can be toggled)

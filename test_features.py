@@ -16,6 +16,16 @@ from obstacles import Obstacle, spike, fire
 from platform import Platform
 from utils import generate_terrain, generate_obstacles
 from settings import WIDTH, HEIGHT, ENEMY_COLORS, NUM_REGULAR_LEVELS, BOSS_LEVEL, TOTAL_LEVELS
+import pygame
+
+# Ensure pygame is initialized so input and surface APIs won't raise errors during tests
+pygame.init()
+try:
+    pygame.display.init()
+    pygame.display.set_mode((1, 1))
+except Exception:
+    # If display cannot initialize in headless environment, ignore; we're only calling key/get_pressed
+    pass
 
 print("=" * 60)
 print("TESTING ENHANCED GAME FEATURES")
@@ -225,6 +235,90 @@ player_jd = Player(100, 400)
 print("    [PASS] Player created with fall_through capability")
 assert hasattr(player_jd, 'falling_through'), "Player should have falling_through attribute"
 print("    [PASS] Down+Space mechanic enabled (collision bug fixed)")
+
+# Test 22: Player Platform Collision (ensure player doesn't fall through)
+print("\n[22] Testing Player Platform Collision: player should land on platform")
+# Put player slightly above the platform so a fall will land on it
+plat = Platform(90, 450, 200, 20)
+player_col = Player(100, plat.rect.top - Player(0,0).height - 5)
+# Simulate fall: give downward velocity and run update
+player_col.vel_y = 5
+player_col.update([plat])
+print(f"    [DEBUG] Player bottom: {player_col.rect.bottom}, Platform top: {plat.rect.top}")
+assert player_col.rect.bottom == plat.rect.top and player_col.vel_y == 0 and player_col.on_ground, "Player should land and be on_ground after fall"
+print("    [PASS] Player landed on platform and did not fall through")
+
+# Test 23: Player Stays On Platform: should not slide off ground or platforms while still
+print("\n[23] Testing Player doesn't slide off platform while standing")
+plat2 = Platform(90, 450, 200, 20)
+player_stationary = Player(100, plat2.rect.top - Player(0,0).height)
+player_stationary.vel_y = 0
+player_stationary.on_ground = True
+bottom_start = player_stationary.rect.bottom
+for _ in range(5):
+    player_stationary.update([plat2])
+    print(f"    [DEBUG] bottom={player_stationary.rect.bottom}, vel_y={player_stationary.vel_y}, on_ground={player_stationary.on_ground}")
+    assert player_stationary.on_ground, "Player should remain on ground"
+    assert player_stationary.vel_y == 0, "Player vertical velocity should remain zero on ground"
+    assert player_stationary.rect.bottom == bottom_start, "Player bottom should remain aligned with platform top"
+print("    [PASS] Player stayed on platform without sliding")
+
+# Test 24: Door unlocking requires pressing SPACE (no auto-enter)
+print("\n[24] Testing Door unlock prompt and SPACE-to-enter mechanism")
+from game import Game
+g = Game(level=1, seed=42)
+# Unlock all doors and place player at a door to test
+for door in g.doors:
+    door.unlock()
+    g.player.rect.topleft = (door.rect.x + 1, door.rect.y + 1)
+    break
+
+# Update once and confirm we are near unlocked door but game did not auto-complete
+g.update()
+assert g.player_is_at_unlocked_door, "Player should be flagged as near an unlocked door"
+assert g.game_state == 0, "Game should still be playing and not auto-advance"
+print("    [PASS] Player near unlocked door but level did not auto-advance")
+
+# Now simulate pressing SPACE
+import pygame as _pg
+_pg.event.post(_pg.event.Event(_pg.KEYDOWN, key=_pg.K_SPACE))
+g.handle_events()
+assert g.game_state == 2, "Game should advance to level complete after pressing SPACE at unlocked door"
+print("    [PASS] Pressing SPACE at unlocked door advances to LEVEL COMPLETE")
+
+# Test 25: Enemies shouldn't scroll offscreen (chase and sine behavior)
+print("\n[25] Testing Enemies Stay On Screen")
+from enemies import Enemy
+player_test = Player(10, 500)
+chase_enemy = Enemy(100, 500, pattern='chase', bounds=None)
+for _ in range(10):
+    chase_enemy.update(player_test, [], None)
+    assert 0 <= chase_enemy.rect.left <= WIDTH, "Chase enemy should not move left off-screen"
+    assert chase_enemy.rect.right <= WIDTH, "Chase enemy should not exceed screen width"
+
+sine_enemy = Enemy(200, 500, pattern='sine', bounds=None)
+for _ in range(20):
+    sine_enemy.update(player_test, [], None)
+    assert 0 <= sine_enemy.rect.left <= WIDTH, "Sine enemy should not move left off-screen"
+    assert sine_enemy.rect.right <= WIDTH, "Sine enemy should not exceed screen width"
+print("    [PASS] Enemies are confined within screen bounds")
+
+# Test 26: Enemies respawn back into screen if they go completely offscreen
+print("\n[26] Testing Enemy Respawn When Offscreen")
+from enemies import Enemy
+# Create a chase enemy and force it offscreen left, then update and verify respawn
+spawn_x, spawn_y = 120, 300
+enemy_off = Enemy(spawn_x, spawn_y, pattern='chase', bounds=None)
+enemy_off.rect.left = -1000  # place well offscreen to the left
+enemy_off.update(Player(400, 300), [], None)
+print(f"    [DEBUG] enemy_off rect after update: {enemy_off.rect.topleft}")
+assert abs(enemy_off.rect.left - spawn_x) <= enemy_off.speed, "Enemy should respawn back near spawn_x after being offscreen"
+
+# Force offscreen right
+enemy_off.rect.left = WIDTH + 1000
+enemy_off.update(Player(1, 1), [], None)
+assert abs(enemy_off.rect.left - spawn_x) <= enemy_off.speed, "Enemy should respawn back near spawn_x after being offscreen to right"
+print("    [PASS] Offscreen enemies respawn back at their spawn point")
 
 print("\n" + "=" * 60)
 print("ALL TESTS PASSED!")

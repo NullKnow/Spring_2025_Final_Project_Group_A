@@ -76,6 +76,8 @@ class Enemy(pygame.sprite.Sprite):
             pygame.draw.rect(surface, GREEN, (bar_x, bar_y, health_width, bar_height))
 
     def update(self, player, platforms, projectiles_group=None):
+        # If enemy is completely offscreen horizontally, respawn first
+        self._respawn_if_offscreen(margin=100)
         # movement patterns
         if self.pattern == 'patrol':
             self.rect.x += self.vx
@@ -88,6 +90,14 @@ class Enemy(pygame.sprite.Sprite):
                 elif self.rect.right >= right:
                     self.rect.right = right
                     self.vx = -abs(self.vx)
+            else:
+                # No explicit bounds: clamp to screen width
+                if self.rect.left <= 0:
+                    self.rect.left = 0
+                    self.vx = abs(self.vx)
+                elif self.rect.right >= WIDTH:
+                    self.rect.right = WIDTH
+                    self.vx = -abs(self.vx)
             
             # Hopping behavior for patrol enemies
             if self.hop_pattern and self.hop_cooldown <= 0:
@@ -98,10 +108,28 @@ class Enemy(pygame.sprite.Sprite):
                 self.rect.x -= self.speed
             else:
                 self.rect.x += self.speed
+            # Clamp chase enemy to bounds or screen
+            if self.bounds:
+                left, right = self.bounds
+            else:
+                left, right = 0, WIDTH
+            if self.rect.left < left:
+                self.rect.left = left
+            if self.rect.right > right:
+                self.rect.right = right
         elif self.pattern == 'sine':
             self.sine_offset += 0.05
             self.rect.y += int(math.sin(self.sine_offset) * 2)
             self.rect.x += self.vx
+            # Clamp sine enemies to bounds or screen
+            if self.bounds:
+                left, right = self.bounds
+            else:
+                left, right = 0, WIDTH
+            if self.rect.left < left:
+                self.rect.left = left
+            if self.rect.right > right:
+                self.rect.right = right
             
             # Hopping behavior for sine enemies
             if self.hop_pattern and self.hop_cooldown <= 0:
@@ -149,5 +177,28 @@ class Enemy(pygame.sprite.Sprite):
         self.health -= amount
         if self.health <= 0:
             self.kill()
+
+    def _respawn_if_offscreen(self, margin=100):
+        """If the enemy has gone off the visible screen horizontally, respawn
+        it at its initial spawn position. This prevents enemies from getting
+        permanently lost outside the playable area."""
+        # Check for offscreen horizontally with margin
+        off_left = self.rect.right < -margin
+        off_right = self.rect.left > WIDTH + margin
+        if off_left or off_right:
+            # Respawn to original spawn position
+            self.rect.topleft = (self.spawn_x, self.spawn_y)
+            # Reset velocities to default patrol/chase defaults
+            self.vy = 0
+            if self.pattern == 'patrol' or self.pattern == 'sine':
+                self.vx = self.speed
+            elif self.pattern == 'chase':
+                # For chase reset vx to flat speed in direction of player if available
+                # Default to positive direction
+                self.vx = self.speed
+            # Reset platform tracking
+            self.current_platform = None
+            # Reset hop cooldown so they don't immediately hop on spawn
+            self.hop_cooldown = 0
 
 

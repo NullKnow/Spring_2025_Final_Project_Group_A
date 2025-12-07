@@ -51,13 +51,16 @@ class Player(pygame.sprite.Sprite):
             self.vel_x = base_speed
             self.facing_right = True
         if keys[pygame.K_SPACE]:
-            if self.on_ground:
-                self.vel_y = -15
-            elif keys[pygame.K_DOWN] and not self.falling_through:
-                # Allow jumping down from non-ground platforms
+            # Allow Down + Space to fall through when standing on a platform
+            if self.on_ground and keys[pygame.K_DOWN] and not self.falling_through:
+                # Fall through this platform
                 self.falling_through = True
                 self.fall_through_timer = 10
-                self.vel_y = 5  # Start falling
+                # Give a little downward kick to start falling
+                self.vel_y = 5
+            elif self.on_ground:
+                # Normal jump
+                self.vel_y = -15
         if keys[pygame.K_a]:
             self.attack()
 
@@ -83,8 +86,14 @@ class Player(pygame.sprite.Sprite):
             self.vel_y = 10
 
     def update(self, platforms):
+        # Keep previous on_ground so we can avoid applying gravity when standing
+        prev_on_ground = self.on_ground
         self.handle_input()
-        self.apply_gravity()
+
+        # Prevent gravity from being applied while the player is standing on ground
+        # (this avoids tiny float velocities and integer rect rounding causing sliding)
+        if not prev_on_ground or self.falling_through or self.vel_y != 0:
+            self.apply_gravity()
         
         # update temporary modifiers
         if self.speed_mod_timer > 0:
@@ -109,13 +118,18 @@ class Player(pygame.sprite.Sprite):
         self.rect.y += self.vel_y
         self.on_ground = False
         
-        for platform in platforms:
+        # Optimize collision checks by only considering platforms near the player
+        nearby_platforms = [p for p in platforms if abs(p.rect.centerx - self.rect.centerx) < 200 and abs(p.rect.centery - self.rect.centery) < 200]
+        for platform in nearby_platforms:
+            # Basic overlap collision
             if self.rect.colliderect(platform.rect):
                 # Only collide from above when falling or standing normally
                 if self.vel_y >= 0:  # Only check when moving down or stationary
                     # Check if we were above the platform before moving
                     old_y = self.rect.y - self.vel_y
-                    if old_y + self.height <= platform.rect.top:
+                    # Add small epsilon tolerance to avoid float->int rounding issues
+                    # when player is very close to the platform top.
+                    if old_y + self.height <= platform.rect.top + 1:
                         # We came from above, so land on platform
                         if self.falling_through:
                             # If actively falling through, skip this platform
@@ -124,6 +138,16 @@ class Player(pygame.sprite.Sprite):
                         self.vel_y = 0
                         self.on_ground = True
                         self.falling_through = False
+                        break  # Stop checking other platforms once landed
+                # Also detect 'touching' case: if player bottom equals platform top but not overlapping
+            elif abs(self.rect.bottom - platform.rect.top) <= 1 and (self.rect.right > platform.rect.left and self.rect.left < platform.rect.right):
+                # Treat as on ground (e.g., initial placement or rounding cases)
+                if not self.falling_through:
+                    self.rect.bottom = platform.rect.top
+                    self.vel_y = 0
+                    self.on_ground = True
+                    self.falling_through = False
+                    break
 
         # Enforce strict horizontal bounds
         if self.rect.left < 0:
